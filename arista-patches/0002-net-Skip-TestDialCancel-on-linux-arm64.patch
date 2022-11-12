@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: microsoft-golang-bot <microsoft-golang-bot@users.noreply.github.com>
+Date: Thu, 24 Feb 2022 17:57:24 -0600
+Subject: [PATCH] net: Skip TestDialCancel on linux-arm64
+
+The test is flaky on our linux-arm64 builder and gets "network is unreachable". See https://github.com/golang/go/issues/37330
+---
+ src/net/dial_test.go | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/net/dial_test.go b/src/net/dial_test.go
+index 1256867da8db77..2a7b0f7517acb1 100644
+--- a/src/net/dial_test.go
++++ b/src/net/dial_test.go
+@@ -735,6 +735,10 @@ func TestDialerKeepAlive(t *testing.T) {
+ func TestDialCancel(t *testing.T) {
+ 	mustHaveExternalNetwork(t)
+ 
++	if strings.HasPrefix(testenv.Builder(), "linux-arm64") {
++		t.Skip("skipping on linux-arm64-*; incompatible network config? issue 37330")
++	}
++
+ 	if strings.HasPrefix(testenv.Builder(), "darwin-arm64") {
+ 		// The darwin-arm64 machines run in an environment that's not
+ 		// compatible with this test.

@@ -40,6 +40,12 @@ function Get-Stage0GoRoot() {
       Default { throw "Unable to match Windows '$proc_arch' to an architecture supported by the Microsoft scripts to build Go." }
     }
   } elseif ($IsLinux) {
+    $current_goroot = go env GOROOT
+    if ($?) {
+      Write-Host "Using pre-installed toolchain with GOROOT at'$current_goroot'"
+      return (Resolve-Path $current_goroot)
+    }
+
     switch ($proc_arch) {
       'x64' {
         $stage0_go_sha256 = 'e85278e98f57cdb150fe8409e6e5df5343ecb13cebf03a5d5ff12bd55a80264f'
