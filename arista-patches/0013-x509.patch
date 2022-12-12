@@ -1,9 +1,26 @@
+diff --git a/src/crypto/x509/boring.go b/src/crypto/x509/boring.go
+index 141fdc5599..f6d9a98bf5 100644
+--- a/src/crypto/x509/boring.go
++++ b/src/crypto/x509/boring.go
+@@ -26,7 +26,7 @@ func boringAllowCert(c *Certificate) bool {
+ 	default:
+ 		return false
+ 	case *rsa.PublicKey:
+-		if size := k.N.BitLen(); size != 2048 && size != 3072 {
++		if size := k.N.BitLen(); size != 2048 && size != 3072 && size != 4096 {
+ 			return false
+ 		}
+ 	case *ecdsa.PublicKey:
 diff --git a/src/crypto/x509/boring_test.go b/src/crypto/x509/boring_test.go
-index 822c3fe217..d1b058b60d 100644
+index 822c3fe217..062dd23332 100644
 --- a/src/crypto/x509/boring_test.go
 +++ b/src/crypto/x509/boring_test.go
-@@ -57,7 +57,7 @@ func TestBoringAllowCert(t *testing.T) {
- 	R2 := testBoringCert(t, "R2", boringRSAKey(t, 4096), nil, boringCertCA)
+@@ -54,10 +54,10 @@ type boringCertificate struct {
+ 
+ func TestBoringAllowCert(t *testing.T) {
+ 	R1 := testBoringCert(t, "R1", boringRSAKey(t, 2048), nil, boringCertCA|boringCertFIPSOK)
+-	R2 := testBoringCert(t, "R2", boringRSAKey(t, 4096), nil, boringCertCA)
++	R2 := testBoringCert(t, "R2", boringRSAKey(t, 4096), nil, boringCertCA|boringCertFIPSOK)
  
  	M1_R1 := testBoringCert(t, "M1_R1", boringECDSAKey(t, elliptic.P256()), R1, boringCertCA|boringCertFIPSOK)
 -	M2_R1 := testBoringCert(t, "M2_R1", boringECDSAKey(t, elliptic.P224()), R1, boringCertCA)

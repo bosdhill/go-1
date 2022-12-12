@@ -29,7 +29,7 @@ index c23d93f3c0..01e057f244 100644
  		if err != nil {
  			t.Errorf("test[%d]: unexpected selectSignatureScheme error: %v", testNo, err)
 diff --git a/src/crypto/tls/boring_test.go b/src/crypto/tls/boring_test.go
-index eda4f89d70..d239543f61 100644
+index eda4f89d70..c8a650f405 100644
 --- a/src/crypto/tls/boring_test.go
 +++ b/src/crypto/tls/boring_test.go
 @@ -24,10 +24,12 @@ import (
@@ -133,10 +133,12 @@ index eda4f89d70..d239543f61 100644
  	// All sorts of traps for the client to avoid.
  	clientConfig.MinVersion = VersionSSL30
  	clientConfig.MaxVersion = VersionTLS13
-@@ -312,9 +322,10 @@ func TestBoringCertAlgs(t *testing.T) {
+@@ -311,10 +321,11 @@ func TestBoringCertAlgs(t *testing.T) {
+ 	// Set up some roots, intermediate CAs, and leaf certs with various algorithms.
  	// X_Y is X signed by Y.
  	R1 := boringCert(t, "R1", boringRSAKey(t, 2048), nil, boringCertCA|boringCertFIPSOK)
- 	R2 := boringCert(t, "R2", boringRSAKey(t, 4096), nil, boringCertCA)
+-	R2 := boringCert(t, "R2", boringRSAKey(t, 4096), nil, boringCertCA)
++	R2 := boringCert(t, "R2", boringRSAKey(t, 4096), nil, boringCertCA|boringCertFIPSOK)
 +	// R2 := boringCert(t, "R2", boringRSAKey(t, 4096), nil, boringCertCA|boringCertFIPSOK)
  
  	M1_R1 := boringCert(t, "M1_R1", boringECDSAKey(t, elliptic.P256()), R1, boringCertCA|boringCertFIPSOK)
