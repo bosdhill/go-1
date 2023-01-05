@@ -1,0 +1,36 @@
+diff --git a/src/crypto/internal/backend/common.go b/src/crypto/internal/backend/common.go
+index 168ea5831a..d3b33bd9f4 100644
+--- a/src/crypto/internal/backend/common.go
++++ b/src/crypto/internal/backend/common.go
+@@ -32,6 +32,9 @@ func envGoFIPS() (string, bool) {
+ 	if v, ok := syscall.Getenv("GOLANG_FIPS"); ok {
+ 		return v, true
+ 	}
++	if v, ok := syscall.Getenv("ARISTA_ENABLE_FIPS"); ok {
++		return v, true
++	}
+ 	return "", false
+ }
+ 
+diff --git a/src/crypto/internal/backend/openssl_linux.go b/src/crypto/internal/backend/openssl_linux.go
+index 4d461237ab..63b5dbdcd9 100644
+--- a/src/crypto/internal/backend/openssl_linux.go
++++ b/src/crypto/internal/backend/openssl_linux.go
+@@ -12,6 +12,7 @@ package backend
+ import (
+ 	"crypto"
+ 	"crypto/cipher"
++	"crypto/internal/boring/fipstls"
+ 	"crypto/internal/boring/sig"
+ 	"hash"
+ 	"syscall"
+@@ -50,6 +51,9 @@ func init() {
+ 				panic("opensslcrypto: can't enable FIPS mode: " + err.Error())
+ 			}
+ 		}
++		// Force TLS to use FIPS-approved settings when in FIPS mode
++		fipstls.Force()
++		sig.FIPSOnly()
+ 	}
+ 	sig.BoringCrypto()
+ }

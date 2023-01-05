@@ -1,0 +1,52 @@
+diff --git a/src/crypto/ecdsa/ecdsa_test.go b/src/crypto/ecdsa/ecdsa_test.go
+index 77a8134316..7c91f1a1e6 100644
+--- a/src/crypto/ecdsa/ecdsa_test.go
++++ b/src/crypto/ecdsa/ecdsa_test.go
+@@ -21,6 +21,8 @@ import (
+ 	"testing"
+ )
+ 
++import boring "crypto/internal/backend"
++
+ func testAllCurves(t *testing.T, f func(*testing.T, elliptic.Curve)) {
+ 	tests := []struct {
+ 		name  string
+@@ -35,6 +37,10 @@ func testAllCurves(t *testing.T, f func(*testing.T, elliptic.Curve)) {
+ 		tests = tests[:1]
+ 	}
+ 	for _, test := range tests {
++		if boring.Enabled && test.name == "P224" {
++			t.Log("p224 not supported in FIPS mode")
++			continue
++		}
+ 		curve := test.curve
+ 		t.Run(test.name, func(t *testing.T) {
+ 			t.Parallel()
+@@ -223,6 +229,9 @@ func TestVectors(t *testing.T) {
+ 
+ 			switch curve {
+ 			case "P-224":
++				if boring.Enabled { // P-224 not supported in RHEL OpenSSL.
++					continue
++				}
+ 				pub.Curve = elliptic.P224()
+ 			case "P-256":
+ 				pub.Curve = elliptic.P256()
+diff --git a/src/crypto/ecdsa/equal_test.go b/src/crypto/ecdsa/equal_test.go
+index 53ac8504c2..3a14f3938e 100644
+--- a/src/crypto/ecdsa/equal_test.go
++++ b/src/crypto/ecdsa/equal_test.go
+@@ -13,7 +13,13 @@ import (
+ 	"testing"
+ )
+ 
++import boring "crypto/internal/backend"
++
+ func testEqual(t *testing.T, c elliptic.Curve) {
++	if boring.Enabled && c == elliptic.P224() {
++		t.Log("p224 not supported in FIPS mode")
++		return
++	}
+ 	private, _ := ecdsa.GenerateKey(c, rand.Reader)
+ 	public := &private.PublicKey
+ 

@@ -1,0 +1,640 @@
+diff --git a/src/crypto/tls/auth_test.go b/src/crypto/tls/auth_test.go
+index c23d93f3c0..01e057f244 100644
+--- a/src/crypto/tls/auth_test.go
++++ b/src/crypto/tls/auth_test.go
+@@ -9,10 +9,12 @@ import (
+ 	"testing"
+ )
+ 
++import boring "crypto/internal/backend"
++
+ func TestSignatureSelection(t *testing.T) {
+ 	rsaCert := &Certificate{
+-		Certificate: [][]byte{testRSACertificate},
+-		PrivateKey:  testRSAPrivateKey,
++		Certificate: [][]byte{testRSA1024Certificate},
++		PrivateKey:  testRSA1024PrivateKey,
+ 	}
+ 	pkcs1Cert := &Certificate{
+ 		Certificate:                  [][]byte{testRSACertificate},
+@@ -57,6 +59,10 @@ func TestSignatureSelection(t *testing.T) {
+ 	}
+ 
+ 	for testNo, test := range tests {
++		if boring.Enabled && !isSupportedSignatureAlgorithm(test.expectedSigAlg, supportedSignatureAlgorithms()) {
++			t.Logf("test[%d]: boring enabled, unsupported signature algorithm", testNo)
++			continue
++		}
+ 		sigAlg, err := selectSignatureScheme(test.tlsVersion, test.cert, test.peerSigAlgs)
+ 		if err != nil {
+ 			t.Errorf("test[%d]: unexpected selectSignatureScheme error: %v", testNo, err)
+diff --git a/src/crypto/tls/boring_test.go b/src/crypto/tls/boring_test.go
+index b117e47ba3..43de1f540d 100644
+--- a/src/crypto/tls/boring_test.go
++++ b/src/crypto/tls/boring_test.go
+@@ -25,10 +25,12 @@ import (
+ 	"time"
+ )
+ 
++import boring "crypto/internal/backend"
++
+ func TestBoringServerProtocolVersion(t *testing.T) {
+ 	test := func(name string, v uint16, msg string) {
+ 		t.Run(name, func(t *testing.T) {
+-			serverConfig := testConfig.Clone()
++			serverConfig := testConfigTemplate()
+ 			serverConfig.MinVersion = VersionSSL30
+ 			clientHello := &clientHelloMsg{
+ 				vers:               v,
+@@ -41,13 +43,15 @@ func TestBoringServerProtocolVersion(t *testing.T) {
+ 		})
+ 	}
+ 
+-	test("VersionTLS10", VersionTLS10, "")
+-	test("VersionTLS11", VersionTLS11, "")
+-	test("VersionTLS12", VersionTLS12, "")
+-	test("VersionTLS13", VersionTLS13, "")
++	if !boring.Enabled {
++		test("VersionTLS10", VersionTLS10, "")
++		test("VersionTLS11", VersionTLS11, "")
++		test("VersionTLS12", VersionTLS12, "")
++		test("VersionTLS13", VersionTLS13, "")
+ 
+-	fipstls.Force()
+-	defer fipstls.Abandon()
++		fipstls.Force()
++		defer fipstls.Abandon()
++	}
+ 	test("VersionSSL30", VersionSSL30, "client offered only unsupported versions")
+ 	test("VersionTLS10", VersionTLS10, "client offered only unsupported versions")
+ 	test("VersionTLS11", VersionTLS11, "client offered only unsupported versions")
+@@ -108,7 +112,7 @@ func isBoringSignatureScheme(alg SignatureScheme) bool {
+ }
+ 
+ func TestBoringServerCipherSuites(t *testing.T) {
+-	serverConfig := testConfig.Clone()
++	serverConfig := testConfigTemplate()
+ 	serverConfig.CipherSuites = allCipherSuites()
+ 	serverConfig.Certificates = make([]Certificate, 1)
+ 
+@@ -131,7 +135,9 @@ func TestBoringServerCipherSuites(t *testing.T) {
+ 				supportedPoints:    []uint8{pointFormatUncompressed},
+ 			}
+ 
+-			testClientHello(t, serverConfig, clientHello)
++			if !boring.Enabled {
++				testClientHello(t, serverConfig, clientHello)
++			}
+ 			t.Run("fipstls", func(t *testing.T) {
+ 				fipstls.Force()
+ 				defer fipstls.Abandon()
+@@ -146,7 +152,7 @@ func TestBoringServerCipherSuites(t *testing.T) {
+ }
+ 
+ func TestBoringServerCurves(t *testing.T) {
+-	serverConfig := testConfig.Clone()
++	serverConfig := testConfigTemplate()
+ 	serverConfig.Certificates = make([]Certificate, 1)
+ 	serverConfig.Certificates[0].Certificate = [][]byte{testECDSACertificate}
+ 	serverConfig.Certificates[0].PrivateKey = testECDSAPrivateKey
+@@ -154,6 +160,9 @@ func TestBoringServerCurves(t *testing.T) {
+ 
+ 	for _, curveid := range defaultCurvePreferences {
+ 		t.Run(fmt.Sprintf("curve=%d", curveid), func(t *testing.T) {
++			// In our version we always enable FIPS TLS. We must abondon it here so that
++			// the test can run as intended, and then re-enable it after all the tests have run.
++			fipstls.Abandon()
+ 			clientHello := &clientHelloMsg{
+ 				vers:               VersionTLS12,
+ 				random:             make([]byte, 32),
+@@ -177,6 +186,7 @@ func TestBoringServerCurves(t *testing.T) {
+ 			})
+ 		})
+ 	}
++	fipstls.Force()
+ }
+ 
+ func boringHandshake(t *testing.T, clientConfig, serverConfig *Config) (clientErr, serverErr error) {
+@@ -201,7 +211,7 @@ func TestBoringServerSignatureAndHash(t *testing.T) {
+ 
+ 	for _, sigHash := range defaultSupportedSignatureAlgorithms {
+ 		t.Run(fmt.Sprintf("%#x", sigHash), func(t *testing.T) {
+-			serverConfig := testConfig.Clone()
++			serverConfig := testConfigTemplate()
+ 			serverConfig.Certificates = make([]Certificate, 1)
+ 
+ 			testingOnlyForceClientHelloSignatureAlgorithms = []SignatureScheme{sigHash}
+@@ -260,7 +270,7 @@ func TestBoringClientHello(t *testing.T) {
+ 	defer c.Close()
+ 	defer s.Close()
+ 
+-	clientConfig := testConfig.Clone()
++	clientConfig := testConfigTemplate()
+ 	// All sorts of traps for the client to avoid.
+ 	clientConfig.MinVersion = VersionSSL30
+ 	clientConfig.MaxVersion = VersionTLS13
+@@ -312,10 +322,10 @@ func TestBoringCertAlgs(t *testing.T) {
+ 	// Set up some roots, intermediate CAs, and leaf certs with various algorithms.
+ 	// X_Y is X signed by Y.
+ 	R1 := boringCert(t, "R1", boringRSAKey(t, 2048), nil, boringCertCA|boringCertFIPSOK)
+-	R2 := boringCert(t, "R2", boringRSAKey(t, 512), nil, boringCertCA)
++	R2 := boringCert(t, "R2", boringRSAKey(t, 4096), nil, boringCertCA|boringCertFIPSOK)
+ 
+ 	M1_R1 := boringCert(t, "M1_R1", boringECDSAKey(t, elliptic.P256()), R1, boringCertCA|boringCertFIPSOK)
+-	M2_R1 := boringCert(t, "M2_R1", boringECDSAKey(t, elliptic.P224()), R1, boringCertCA)
++	var M2_R1 *boringCertificate
+ 
+ 	I_R1 := boringCert(t, "I_R1", boringRSAKey(t, 3072), R1, boringCertCA|boringCertFIPSOK)
+ 	I_R2 := boringCert(t, "I_R2", I_R1.key, R2, boringCertCA|boringCertFIPSOK)
+@@ -323,16 +333,17 @@ func TestBoringCertAlgs(t *testing.T) {
+ 	I_M2 := boringCert(t, "I_M2", I_R1.key, M2_R1, boringCertCA|boringCertFIPSOK)
+ 
+ 	L1_I := boringCert(t, "L1_I", boringECDSAKey(t, elliptic.P384()), I_R1, boringCertLeaf|boringCertFIPSOK)
+-	L2_I := boringCert(t, "L2_I", boringRSAKey(t, 1024), I_R1, boringCertLeaf)
++	L2_I := boringCert(t, "L2_I", boringRSAKey(t, 2048), I_R1, boringCertLeaf|boringCertFIPSOK)
++	_ = boringCert(t, "L3_I", boringECDSAKey(t, elliptic.P521()), I_R1, boringCertLeaf|boringCertFIPSOK)
+ 
+ 	// client verifying server cert
+ 	testServerCert := func(t *testing.T, desc string, pool *x509.CertPool, key interface{}, list [][]byte, ok bool) {
+-		clientConfig := testConfig.Clone()
++		clientConfig := testConfigTemplate()
+ 		clientConfig.RootCAs = pool
+ 		clientConfig.InsecureSkipVerify = false
+ 		clientConfig.ServerName = "example.com"
+ 
+-		serverConfig := testConfig.Clone()
++		serverConfig := testConfigTemplate()
+ 		serverConfig.Certificates = []Certificate{{Certificate: list, PrivateKey: key}}
+ 		serverConfig.BuildNameToCertificate()
+ 
+@@ -355,11 +366,11 @@ func TestBoringCertAlgs(t *testing.T) {
+ 
+ 	// server verifying client cert
+ 	testClientCert := func(t *testing.T, desc string, pool *x509.CertPool, key interface{}, list [][]byte, ok bool) {
+-		clientConfig := testConfig.Clone()
++		clientConfig := testConfigTemplate()
+ 		clientConfig.ServerName = "example.com"
+ 		clientConfig.Certificates = []Certificate{{Certificate: list, PrivateKey: key}}
+ 
+-		serverConfig := testConfig.Clone()
++		serverConfig := testConfigTemplate()
+ 		serverConfig.ClientCAs = pool
+ 		serverConfig.ClientAuth = RequireAndVerifyClientCert
+ 
+@@ -384,11 +395,12 @@ func TestBoringCertAlgs(t *testing.T) {
+ 	// exhaustive test with computed answers.
+ 	r1pool := x509.NewCertPool()
+ 	r1pool.AddCert(R1.cert)
+-	testServerCert(t, "basic", r1pool, L2_I.key, [][]byte{L2_I.der, I_R1.der}, true)
+-	testClientCert(t, "basic (client cert)", r1pool, L2_I.key, [][]byte{L2_I.der, I_R1.der}, true)
++	shouldPass := true
++	testClientCert(t, "basic (client cert)", r1pool, L2_I.key, [][]byte{L2_I.der, I_R1.der}, shouldPass)
++	testClientCert(t, "basic (client cert)", r1pool, L2_I.key, [][]byte{L2_I.der, I_R1.der}, shouldPass)
+ 	fipstls.Force()
+-	testServerCert(t, "basic (fips)", r1pool, L2_I.key, [][]byte{L2_I.der, I_R1.der}, false)
+-	testClientCert(t, "basic (fips, client cert)", r1pool, L2_I.key, [][]byte{L2_I.der, I_R1.der}, false)
++	testServerCert(t, "basic (fips)", r1pool, L2_I.key, [][]byte{L2_I.der, I_R1.der}, true)
++	testClientCert(t, "basic (fips, client cert)", r1pool, L2_I.key, [][]byte{L2_I.der, I_R1.der}, true)
+ 	fipstls.Abandon()
+ 
+ 	if t.Failed() {
+@@ -427,7 +439,7 @@ func TestBoringCertAlgs(t *testing.T) {
+ 			addList(i&4, I_M1)
+ 			addList(i&8, I_M2)
+ 			addList(i&16, M1_R1)
+-			addList(i&32, M2_R1)
++			// addList(i&32, M2_R1)
+ 
+ 			for r := 1; r <= 3; r++ {
+ 				pool := x509.NewCertPool()
+@@ -449,6 +461,10 @@ func TestBoringCertAlgs(t *testing.T) {
+ 				addRoot(r&1, R1)
+ 				addRoot(r&2, R2)
+ 				rootName = rootName[1:] // strip leading comma
++				// openssl 3 FIPS provider fails these now without fipstls.Force()
++				// if boring.Enabled {
++				// 	shouldVerify = shouldVerifyFIPS
++				// }
+ 				testServerCert(t, listName+"->"+rootName[1:], pool, leaf.key, list, shouldVerify)
+ 				testClientCert(t, listName+"->"+rootName[1:]+"(client cert)", pool, leaf.key, list, shouldVerify)
+ 				fipstls.Force()
+@@ -554,30 +570,63 @@ func boringCert(t *testing.T, name string, key interface{}, parent *boringCertif
+ // A self-signed test certificate with an RSA key of size 2048, for testing
+ // RSA-PSS with SHA512. SAN of example.golang.
+ var (
+-	testRSA2048Certificate []byte
+-	testRSA2048PrivateKey  *rsa.PrivateKey
++	testRSA2048CertificateIssuer []byte
++	testRSA2048Certificate       []byte
++	testRSA2048PrivateKey        *rsa.PrivateKey
+ )
+ 
++func testConfigTemplate() *Config {
++	config := testConfig.Clone()
++	if boring.Enabled {
++		config.Certificates[0].Certificate = [][]byte{testRSA2048Certificate}
++		config.Certificates[0].PrivateKey = testRSA2048PrivateKey
++	}
++	return config
++
++}
++
+ func init() {
+ 	block, _ := pem.Decode(obscuretestdata.Rot13([]byte(`
+ -----ORTVA PREGVSVPNGR-----
+-ZVVP/mPPNrrtNjVONtVENYUUK/xu4+4mZH9QnemORpDjQDLWXbMVuipANDRYODNj
+-RwRDZN4TN1HRPuZUDJAgMFOQomNrSj0kZGNkZQRkAGN0ZQInSj0lZQRlZwxkAGN0
+-ZQInZOVkRQNBOtAIONbGO0SwoJHtD28jttRvZN0TPFdTFVo3QDRONDHNN4VOQjNj
+-ttRXNbVONDPs8sx0A6vrPOK4VBIVsXvgg4xTpBDYrvzPsfwddUplfZVITRgSFZ6R
+-4Nl141s/7VdqJ0HgVdAo4CKuEBVQ7lQkE284kY6KoPhi/g5uC3HpruLp3uzYvlIq
+-ZxMDvMJgsHHWs/1dBgZ+buAt59YEJc4q+6vK0yn1WY3RjPVpxxAwW9uDoS7Co2PF
+-+RF9Lb55XNnc8XBoycpE8ZOFA38odajwsDqPKiBRBwnz2UHkXmRSK5ZN+sN0zr4P
+-vbPpPEYJXy+TbA9S8sNOsbM+G+2rny4QYhB95eKE8FeBVIOu3KSBe/EIuwgKpAIS
+-MXpiQg6q68I6wNXNLXz5ayw9TCcq4i+eNtZONNTwHQOBZN4TN1HqQjRO/jDRNjVS
+-bQNGOtAIUFHRQQNXOtteOtRSODpQNGNZOtAIUEZONs8RNwNNZOxTN1HqRDDFZOPP
+-QzI4LJ1joTHhM29fLJ5aZN0TPFdTFVo3QDROPjHNN4VONDPBbLfIpSPOuobdr3JU
+-qP6I7KKKRPzawu01e8u80li0AE379aFQ3pj2Z+UXinKlfJdey5uwTIXj0igjQ81e
+-I4WmQh7VsVbt5z8+DAP+7YdQMfm88iQXBefblFIBzHPtzPXSKrj+YN+rB/vDRWGe
+-7rafqqBrKWRc27Rq5iJ+xzJJ3Dztyp2Tjl8jSeZQVdaeaBmON4bPaQRtgKWg0mbt
+-aEjosRZNJv1nDEl5qG9XN3FC9zb5FrGSFmTTUvR4f4tUHr7wifNSS2dtgQ6+jU6f
+-m9o6fukaP7t5VyOXuV7FIO/Hdg2lqW+xU1LowZpVd6ANZ5rAZXtMhWe3+mjfFtju
+-TAnR
++ZVVQVwPPNtdtNjVONtVWNZcrGbRnyyyxZN0TPFdTFVo3QDROPjHNZO8kPmNWOtAI
++ONbGNxqiZENjQtLQIDDQRjqUolOFo290ZO4KQGR2ZQRjZGNjZQNjZSbKQGV1ZQRj
++ZGNjZQNjZSbjUmRYZNxTN1HRPuZPE28kRQNBOtAIONZGO0qiVSWio3DjttRvZN0T
++PFdTFVo3QDRONDHNN4VOQjNjttRXNbVONDPKTUkjGFCUuxqGqwa6pwtrkqnXbmlY
++SrQqMN77B6ajjqpVKsGxXxHmNtC/oDAcFP7CrsJy0jWpMZCYok//0VTs/dqCRAt3
+++ZHVJSUyuM7gHsSk9KQ3o/21E1sAY1oU1h2fYyzVJOfiTOeQhfjU2DtYJTqY+noy
++nu7x5dvV/QjbYnJb6SwqNN4fTsZAs8hDTGEa2NuQKgAcMwwqV2DOFYfg/Mju1m16
++hrF61zqSi1YO43jBzyuK7ohunBAFawvO1q5ieSRPJNo5myBxw044khq6rLyeOL7V
++apuwAy9BPq6z8QTzOHdVoSBQj5sDT8O1ZGo15vQyJR5SM9Oh8xAnRyMANtZONNTw
++LGOsZN4TN1HqQjRO/jDRNjVPOQNqOtAIUFHRSwNHOtteOtRSODpQNtLVXjLOODHU
++NjRjQjLQIE0GNDU/ONHjNjRO/mNqOtAIUD4RStDHhGIfFrv3os4UtLHXWVE02NL2
++qd8jQDLWXbMVuipANDRYODNQttRONOpt7RQRcgzqMEXrSt95qbAYdFaBNsjeQn2g
++/QVcKW0XDGbq/VKINUfScs628ida4mNBN7cQCpx0dI1x2GsgWC5wvEvXSNrJfU3J
++3tiaixgw7yeOCRzGseTBd8rvAwmt7prmkU7LpPTCdXPBR2cABA4SVlMi/3JtJYJi
++nQocdd2o6GREWEUGvQtIRLohOVYwvZvLxzdurFXjZrnYyjBvZ3/Pjlem+i4P7Qx3
++iYCvo/V2COhuwW6Hk8KafWoFjYQeng5PLSZEPl5RTjW8FxYGVuEZs8w+7Twl2IJ4
+++vA0uuWIh5wzdXAwPtQe/LPJRD6guWNu0C4J4PL9HFora3G63OL=
++-----RAQ PREGVSVPNGR-----`)))
++	testRSA2048CertificateIssuer = block.Bytes
++
++	block, _ = pem.Decode(obscuretestdata.Rot13([]byte(`
++-----ORTVA PREGVSVPNGR-----
++ZVVQSwPPNs6tNjVONtVWNBwjaG/vJ+dzZN0TPFdTFVo3QDROPjHNZO8kPmNWOtAI
++ONbGNxqiZENjQtLQIDDQRjqUolOFo290ZO4KQGR2ZQRjZGNjZQNjZSbKQGV1ZQRj
++ZGNjZQNjZSbjTwRYZNxTN1HRPuZPE28kPmNWOtAIONZGNxqiZVVOVwNAOtxduxvT
++9j0ONDRSNNBPND8NZVVOPtXPNDRNa/U5AQrbattI+PQyFUlbeorWOaQxP3bcta7V
++6du3ZeQPSEuYEHwBuBNZgrAK/+lXaIgSYFXwJ+Q14HGvN+8t8HqiBZF+y2jee/7r
++LG91UUbJUA4Mv4fyKGWTHVzIeK1SPK/9nweGCdVGLBsF0IdrUshby9WJgFF9kZNv
++UWWQLlsLHTkrm29txiuRiJXBrFtTdsPwz5nKRsQNHwq/T6c8V30UDy7muQb2cgu1
++ZFfkOI+GNCajAWahNbdNaNxF1vcsudQsEsUjNK6Tsx/gazcrNl7wirn10sRdmvSD
++Lq1kGd/0ILL7I3QIEJFaYj7rariSrbjPtTPchM5L/Ew6KrY/djVQNDNOb1bjJQNB
++OtAIUD8ONs8RONZPOnNjUDLQIE0yOOLjSNLVXjLOODHUNjVTPPfTNDHSOjZOZNjT
++N1HqRjRO/jDPZNNjTDLQIE0EOOVjRVVBMKuuoKOfMF5ao2kuozpjQDLWXbMVuipA
++NDRYODNQttRONUuxCNxxjRNGtmjA59LizP3fCzvC+CLQ7UTOyYymSmUGCp3DVolE
++Vl1jZIUa/VP+ucJbxplIdSv6Ct+aYio6B/n08MmDXZEwYlKwv4ytOZWGUiTTdNUd
++DRy9MGx7oMGnSBYeXF7umbsa9o9HyprErDnuXLmQ3gXxUaE398Q0krsA9qOppvyO
++JIA+Wb9YqQtXs/UF6hsJ7gKrMMndyYc46eb5fG+UV2CzEMdtjC0cXqjFeAahd2Yv
++WNhYg61GG7bb2KL7aDC41dqE0oRI0ZL0jwEFkoTl3ckV/6RAXUZHMPSJAos/WCnV
++eEIVPks1KJ1AhCP0vX8hBa/g96WlFRqNxsH=
+ -----RAQ PREGVSVPNGR-----`)))
+ 	testRSA2048Certificate = block.Bytes
+ 
+@@ -614,4 +663,9 @@ bBegiZqey6hcl9Um4OWQ3SKjISvCSR7wdrAdv0S21ivYkOCZZQ3HBQS6YY5RlYvE
+ 	if err != nil {
+ 		panic(err)
+ 	}
++	if boring.Enabled {
++		testRSACertificate = testRSA2048Certificate
++		testRSACertificateIssuer = testRSA2048CertificateIssuer
++		testRSAPrivateKey = testRSA2048PrivateKey
++	}
+ }
+diff --git a/src/crypto/tls/conn_test.go b/src/crypto/tls/conn_test.go
+index 78935b1234..aa8bfd15ec 100644
+--- a/src/crypto/tls/conn_test.go
++++ b/src/crypto/tls/conn_test.go
+@@ -11,6 +11,8 @@ import (
+ 	"testing"
+ )
+ 
++import boring "crypto/internal/backend"
++
+ func TestRoundUp(t *testing.T) {
+ 	if roundUp(0, 16) != 0 ||
+ 		roundUp(1, 16) != 16 ||
+@@ -230,6 +232,9 @@ func runDynamicRecordSizingTest(t *testing.T, config *Config) {
+ }
+ 
+ func TestDynamicRecordSizingWithStreamCipher(t *testing.T) {
++	if boring.Enabled {
++		t.Skip("boring enabled, TLS_RSA_WITH_RC4_128_SHA not supported")
++	}
+ 	config := testConfig.Clone()
+ 	config.MaxVersion = VersionTLS12
+ 	config.CipherSuites = []uint16{TLS_RSA_WITH_RC4_128_SHA}
+@@ -237,6 +242,9 @@ func TestDynamicRecordSizingWithStreamCipher(t *testing.T) {
+ }
+ 
+ func TestDynamicRecordSizingWithCBC(t *testing.T) {
++	if boring.Enabled {
++		t.Skip("boring enabled, TLS_RSA_WITH_AES_256_CBC_SHA not supported")
++	}
+ 	config := testConfig.Clone()
+ 	config.MaxVersion = VersionTLS12
+ 	config.CipherSuites = []uint16{TLS_RSA_WITH_AES_256_CBC_SHA}
+@@ -251,6 +259,9 @@ func TestDynamicRecordSizingWithAEAD(t *testing.T) {
+ }
+ 
+ func TestDynamicRecordSizingWithTLSv13(t *testing.T) {
++	if boring.Enabled {
++		t.Skip("boring enabled, TLS > 1.2 not supported")
++	}
+ 	config := testConfig.Clone()
+ 	runDynamicRecordSizingTest(t, config)
+ }
+diff --git a/src/crypto/tls/handshake_client_test.go b/src/crypto/tls/handshake_client_test.go
+index 380de9f6fb..d455eee1a8 100644
+--- a/src/crypto/tls/handshake_client_test.go
++++ b/src/crypto/tls/handshake_client_test.go
+@@ -28,6 +28,8 @@ import (
+ 	"time"
+ )
+ 
++import boring "crypto/internal/backend"
++
+ // Note: see comment in handshake_test.go for details of how the reference
+ // tests work.
+ 
+@@ -514,18 +516,37 @@ func runClientTestForVersion(t *testing.T, template *clientTest, version, option
+ }
+ 
+ func runClientTestTLS10(t *testing.T, template *clientTest) {
++	if boring.Enabled {
++		t.Log("boring enabled, TLS < 1.2 not supported")
++		return
++	 }
+ 	runClientTestForVersion(t, template, "TLSv10", "-tls1")
+ }
+ 
+ func runClientTestTLS11(t *testing.T, template *clientTest) {
++	if boring.Enabled {
++		t.Log("boring enabled, TLS < 1.2 not supported")
++		return
++	 }
+ 	runClientTestForVersion(t, template, "TLSv11", "-tls1_1")
+ }
+ 
+ func runClientTestTLS12(t *testing.T, template *clientTest) {
++	// TLS reference tests run a connection against a reference implementation
++	// (OpenSSL v1.1.1) of TLS and record the bytes of the resulting connection,
++	// but only OpenSSL v1.0.2k is supported in the testing environment.
++	if boring.Enabled {
++		t.Log("boring enabled, openssl 1.1.1 implementation is not supported")
++		return
++	}
+ 	runClientTestForVersion(t, template, "TLSv12", "-tls1_2")
+ }
+ 
+ func runClientTestTLS13(t *testing.T, template *clientTest) {
++	if boring.Enabled {
++		t.Log("boring enabled, TLS < 1.2 not supported")
++		return
++	}
+ 	runClientTestForVersion(t, template, "TLSv13", "-tls1_3")
+ }
+ 
+@@ -877,6 +898,9 @@ func testResumption(t *testing.T, version uint16) {
+ 	if testing.Short() {
+ 		t.Skip("skipping in -short mode")
+ 	}
++	if boring.Enabled && version == VersionTLS13 {
++		t.Skip("boring enabled, TLS 1.3 not supported")
++	}
+ 	serverConfig := &Config{
+ 		MaxVersion:   version,
+ 		CipherSuites: []uint16{TLS_RSA_WITH_RC4_128_SHA, TLS_ECDHE_RSA_WITH_RC4_128_SHA},
+@@ -1162,6 +1186,9 @@ func TestKeyLogTLS12(t *testing.T) {
+ }
+ 
+ func TestKeyLogTLS13(t *testing.T) {
++	if boring.Enabled {
++		t.Skip("boring enabled, TLS 1.3 not supported")
++	}
+ 	var serverBuf, clientBuf bytes.Buffer
+ 
+ 	clientConfig := testConfig.Clone()
+@@ -1523,6 +1550,9 @@ func TestVerifyConnection(t *testing.T) {
+ }
+ 
+ func testVerifyConnection(t *testing.T, version uint16) {
++	if boring.Enabled && version == VersionTLS13 {
++		t.Skip("boring enabled, TLS 1.3 not supported")
++	}
+ 	checkFields := func(c ConnectionState, called *int, errorType string) error {
+ 		if c.Version != version {
+ 			return fmt.Errorf("%s: got Version %v, want %v", errorType, c.Version, version)
+@@ -1745,6 +1775,9 @@ func TestVerifyPeerCertificate(t *testing.T) {
+ }
+ 
+ func testVerifyPeerCertificate(t *testing.T, version uint16) {
++	if boring.Enabled && version == VersionTLS13 {
++		t.Skip("boring enabled, TLS 1.3 not supported")
++	}
+ 	issuer, err := x509.ParseCertificate(testRSACertificateIssuer)
+ 	if err != nil {
+ 		panic(err)
+@@ -2095,6 +2128,9 @@ func TestBuffering(t *testing.T) {
+ }
+ 
+ func testBuffering(t *testing.T, version uint16) {
++	if boring.Enabled && version == VersionTLS13 {
++		t.Skip("boring enabled, TLS 1.3 not supported")
++	}
+ 	c, s := localPipe(t)
+ 	done := make(chan bool)
+ 
+@@ -2337,6 +2373,11 @@ func testGetClientCertificate(t *testing.T, version uint16) {
+ 		clientConfig.MaxVersion = version
+ 
+ 		test.setup(clientConfig, serverConfig)
++		if boring.Enabled && clientConfig.MaxVersion == VersionTLS11 || version == VersionTLS13 {
++			t.Log("unsupported TLS version in FIPS mode")
++			continue
++		}
++
+ 
+ 		type serverResult struct {
+ 			cs  ConnectionState
+@@ -2452,6 +2493,9 @@ func testDowngradeCanary(t *testing.T, clientVersion, serverVersion uint16) erro
+ }
+ 
+ func TestDowngradeCanary(t *testing.T) {
++	if boring.Enabled {
++		t.Skip("Boring enabled, TLS version is fixed at 1.2")
++	}
+ 	if err := testDowngradeCanary(t, VersionTLS13, VersionTLS12); err == nil {
+ 		t.Errorf("downgrade from TLS 1.3 to TLS 1.2 was not detected")
+ 	}
+@@ -2490,6 +2534,9 @@ func TestResumptionKeepsOCSPAndSCT(t *testing.T) {
+ }
+ 
+ func testResumptionKeepsOCSPAndSCT(t *testing.T, ver uint16) {
++	if boring.Enabled && ver == VersionTLS13 {
++		t.Skip("boring enabled, TLS 1.3 not supported")
++	}
+ 	issuer, err := x509.ParseCertificate(testRSACertificateIssuer)
+ 	if err != nil {
+ 		t.Fatalf("failed to parse test issuer")
+diff --git a/src/crypto/tls/handshake_server_test.go b/src/crypto/tls/handshake_server_test.go
+index 39b65f6de8..b2c07061f9 100644
+--- a/src/crypto/tls/handshake_server_test.go
++++ b/src/crypto/tls/handshake_server_test.go
+@@ -26,6 +26,8 @@ import (
+ 	"golang.org/x/crypto/curve25519"
+ )
+ 
++import boring "crypto/internal/backend"
++
+ func testClientHello(t *testing.T, serverConfig *Config, m handshakeMessage) {
+ 	testClientHelloFailure(t, serverConfig, m, "")
+ }
+@@ -372,6 +374,9 @@ func TestClose(t *testing.T) {
+ }
+ 
+ func TestVersion(t *testing.T) {
++	if boring.Enabled {
++		t.Skip("boring enabled, unsupported TLS versions")
++	}
+ 	serverConfig := &Config{
+ 		Certificates: testConfig.Certificates,
+ 		MaxVersion:   VersionTLS11,
+@@ -430,6 +435,9 @@ func TestSCTHandshake(t *testing.T) {
+ }
+ 
+ func testSCTHandshake(t *testing.T, version uint16) {
++	if boring.Enabled && version == VersionTLS13 {
++		t.Skip("boring enabled, TLS 1.3 not supported")
++	}
+ 	expected := [][]byte{[]byte("certificate"), []byte("transparency")}
+ 	serverConfig := &Config{
+ 		Certificates: []Certificate{{
+@@ -755,18 +763,34 @@ func runServerTestForVersion(t *testing.T, template *serverTest, version, option
+ }
+ 
+ func runServerTestTLS10(t *testing.T, template *serverTest) {
++	if boring.Enabled {
++		t.Log("boring enabled, TLS < 1.2 not supported")
++		return
++	}
+ 	runServerTestForVersion(t, template, "TLSv10", "-tls1")
+ }
+ 
+ func runServerTestTLS11(t *testing.T, template *serverTest) {
++	if boring.Enabled {
++		t.Log("boring enabled, TLS < 1.2 not supported")
++		return
++	}
+ 	runServerTestForVersion(t, template, "TLSv11", "-tls1_1")
+ }
+ 
+ func runServerTestTLS12(t *testing.T, template *serverTest) {
++	if boring.Enabled {
++		t.Log("boring enabled, openssl 1.1.1 implementation is not supported")
++		return
++	}
+ 	runServerTestForVersion(t, template, "TLSv12", "-tls1_2")
+ }
+ 
+ func runServerTestTLS13(t *testing.T, template *serverTest) {
++	if boring.Enabled {
++		t.Log("boring enabled, TLS > 1.2 not supported")
++		return
++	}
+ 	runServerTestForVersion(t, template, "TLSv13", "-tls1_3")
+ }
+ 
+diff --git a/src/crypto/tls/handshake_test.go b/src/crypto/tls/handshake_test.go
+index bacc8b7d4f..edcd03670d 100644
+--- a/src/crypto/tls/handshake_test.go
++++ b/src/crypto/tls/handshake_test.go
+@@ -24,6 +24,9 @@ import (
+ 	"time"
+ )
+ 
++import "crypto/rsa"
++import boring "crypto/internal/backend"
++
+ // TLS reference tests run a connection against a reference implementation
+ // (OpenSSL) of TLS and record the bytes of the resulting connection. The Go
+ // code, during a test, is configured with deterministic randomness and so the
+@@ -429,10 +432,6 @@ func fromHex(s string) []byte {
+ 	return b
+ }
+ 
+-var testRSACertificate = fromHex("3082024b308201b4a003020102020900e8f09d3fe25beaa6300d06092a864886f70d01010b0500301f310b3009060355040a1302476f3110300e06035504031307476f20526f6f74301e170d3136303130313030303030305a170d3235303130313030303030305a301a310b3009060355040a1302476f310b300906035504031302476f30819f300d06092a864886f70d010101050003818d0030818902818100db467d932e12270648bc062821ab7ec4b6a25dfe1e5245887a3647a5080d92425bc281c0be97799840fb4f6d14fd2b138bc2a52e67d8d4099ed62238b74a0b74732bc234f1d193e596d9747bf3589f6c613cc0b041d4d92b2b2423775b1c3bbd755dce2054cfa163871d1e24c4f31d1a508baab61443ed97a77562f414c852d70203010001a38193308190300e0603551d0f0101ff0404030205a0301d0603551d250416301406082b0601050507030106082b06010505070302300c0603551d130101ff0402300030190603551d0e041204109f91161f43433e49a6de6db680d79f60301b0603551d230414301280104813494d137e1631bba301d5acab6e7b30190603551d1104123010820e6578616d706c652e676f6c616e67300d06092a864886f70d01010b0500038181009d30cc402b5b50a061cbbae55358e1ed8328a9581aa938a495a1ac315a1a84663d43d32dd90bf297dfd320643892243a00bccf9c7db74020015faad3166109a276fd13c3cce10c5ceeb18782f16c04ed73bbb343778d0c1cf10fa1d8408361c94c722b9daedb4606064df4c1b33ec0d1bd42d4dbfe3d1360845c21d33be9fae7")
+-
+-var testRSACertificateIssuer = fromHex("3082021930820182a003020102020900ca5e4e811a965964300d06092a864886f70d01010b0500301f310b3009060355040a1302476f3110300e06035504031307476f20526f6f74301e170d3136303130313030303030305a170d3235303130313030303030305a301f310b3009060355040a1302476f3110300e06035504031307476f20526f6f7430819f300d06092a864886f70d010101050003818d0030818902818100d667b378bb22f34143b6cd2008236abefaf2852adf3ab05e01329e2c14834f5105df3f3073f99dab5442d45ee5f8f57b0111c8cb682fbb719a86944eebfffef3406206d898b8c1b1887797c9c5006547bb8f00e694b7a063f10839f269f2c34fff7a1f4b21fbcd6bfdfb13ac792d1d11f277b5c5b48600992203059f2a8f8cc50203010001a35d305b300e0603551d0f0101ff040403020204301d0603551d250416301406082b0601050507030106082b06010505070302300f0603551d130101ff040530030101ff30190603551d0e041204104813494d137e1631bba301d5acab6e7b300d06092a864886f70d01010b050003818100c1154b4bab5266221f293766ae4138899bd4c5e36b13cee670ceeaa4cbdf4f6679017e2fe649765af545749fe4249418a56bd38a04b81e261f5ce86b8d5c65413156a50d12449554748c59a30c515bc36a59d38bddf51173e899820b282e40aa78c806526fd184fb6b4cf186ec728edffa585440d2b3225325f7ab580e87dd76")
+-
+ // testRSAPSSCertificate has signatureAlgorithm rsassaPss, but subjectPublicKeyInfo
+ // algorithm rsaEncryption, for use with the rsa_pss_rsae_* SignatureSchemes.
+ // See also TestRSAPSSKeyError. testRSAPSSCertificate is self-signed.
+@@ -446,8 +445,6 @@ var testSNICertificate = fromHex("0441883421114c81480804c430820237308201a0a00302
+ 
+ var testP256Certificate = fromHex("308201693082010ea00302010202105012dc24e1124ade4f3e153326ff27bf300a06082a8648ce3d04030230123110300e060355040a130741636d6520436f301e170d3137303533313232343934375a170d3138303533313232343934375a30123110300e060355040a130741636d6520436f3059301306072a8648ce3d020106082a8648ce3d03010703420004c02c61c9b16283bbcc14956d886d79b358aa614596975f78cece787146abf74c2d5dc578c0992b4f3c631373479ebf3892efe53d21c4f4f1cc9a11c3536b7f75a3463044300e0603551d0f0101ff0404030205a030130603551d25040c300a06082b06010505070301300c0603551d130101ff04023000300f0603551d1104083006820474657374300a06082a8648ce3d0403020349003046022100963712d6226c7b2bef41512d47e1434131aaca3ba585d666c924df71ac0448b3022100f4d05c725064741aef125f243cdbccaa2a5d485927831f221c43023bd5ae471a")
+ 
+-var testRSAPrivateKey, _ = x509.ParsePKCS1PrivateKey(fromHex("3082025b02010002818100db467d932e12270648bc062821ab7ec4b6a25dfe1e5245887a3647a5080d92425bc281c0be97799840fb4f6d14fd2b138bc2a52e67d8d4099ed62238b74a0b74732bc234f1d193e596d9747bf3589f6c613cc0b041d4d92b2b2423775b1c3bbd755dce2054cfa163871d1e24c4f31d1a508baab61443ed97a77562f414c852d702030100010281800b07fbcf48b50f1388db34b016298b8217f2092a7c9a04f77db6775a3d1279b62ee9951f7e371e9de33f015aea80660760b3951dc589a9f925ed7de13e8f520e1ccbc7498ce78e7fab6d59582c2386cc07ed688212a576ff37833bd5943483b5554d15a0b9b4010ed9bf09f207e7e9805f649240ed6c1256ed75ab7cd56d9671024100fded810da442775f5923debae4ac758390a032a16598d62f059bb2e781a9c2f41bfa015c209f966513fe3bf5a58717cbdb385100de914f88d649b7d15309fa49024100dd10978c623463a1802c52f012cfa72ff5d901f25a2292446552c2568b1840e49a312e127217c2186615aae4fb6602a4f6ebf3f3d160f3b3ad04c592f65ae41f02400c69062ca781841a09de41ed7a6d9f54adc5d693a2c6847949d9e1358555c9ac6a8d9e71653ac77beb2d3abaf7bb1183aa14278956575dbebf525d0482fd72d90240560fe1900ba36dae3022115fd952f2399fb28e2975a1c3e3d0b679660bdcb356cc189d611cfdd6d87cd5aea45aa30a2082e8b51e94c2f3dd5d5c6036a8a615ed0240143993d80ece56f877cb80048335701eb0e608cc0c1ca8c2227b52edf8f1ac99c562f2541b5ce81f0515af1c5b4770dba53383964b4b725ff46fdec3d08907df"))
+-
+ var testECDSAPrivateKey, _ = x509.ParseECPrivateKey(fromHex("3081dc0201010442019883e909ad0ac9ea3d33f9eae661f1785206970f8ca9a91672f1eedca7a8ef12bd6561bb246dda5df4b4d5e7e3a92649bc5d83a0bf92972e00e62067d0c7bd99d7a00706052b81040023a18189038186000400c4a1edbe98f90b4873367ec316561122f23d53c33b4d213dcd6b75e6f6b0dc9adf26c1bcb287f072327cb3642f1c90bcea6823107efee325c0483a69e0286dd33700ef0462dd0da09c706283d881d36431aa9e9731bd96b068c09b23de76643f1a5c7fe9120e5858b65f70dd9bd8ead5d7f5d5ccb9b69f30665b669a20e227e5bffe3b"))
+ 
+ var testP256PrivateKey, _ = x509.ParseECPrivateKey(fromHex("30770201010420012f3b52bc54c36ba3577ad45034e2e8efe1e6999851284cb848725cfe029991a00a06082a8648ce3d030107a14403420004c02c61c9b16283bbcc14956d886d79b358aa614596975f78cece787146abf74c2d5dc578c0992b4f3c631373479ebf3892efe53d21c4f4f1cc9a11c3536b7f75"))
+@@ -528,3 +525,24 @@ var clientEd25519KeyPEM = testingKey(`
+ -----BEGIN TESTING KEY-----
+ MC4CAQAwBQYDK2VwBCIEINifzf07d9qx3d44e0FSbV4mC/xQxT644RRbpgNpin7I
+ -----END TESTING KEY-----`)
++
++var (
++	testRSACertificate       []byte
++	testRSACertificateIssuer []byte
++	testRSA1024Certificate   []byte
++	testRSA1024PrivateKey    *rsa.PrivateKey
++	testRSAPrivateKey        *rsa.PrivateKey
++)
++
++func init() {
++	testRSACertificate = fromHex("3082024b308201b4a003020102020900e8f09d3fe25beaa6300d06092a864886f70d01010b0500301f310b3009060355040a1302476f3110300e06035504031307476f20526f6f74301e170d3136303130313030303030305a170d3235303130313030303030305a301a310b3009060355040a1302476f310b300906035504031302476f30819f300d06092a864886f70d010101050003818d0030818902818100db467d932e12270648bc062821ab7ec4b6a25dfe1e5245887a3647a5080d92425bc281c0be97799840fb4f6d14fd2b138bc2a52e67d8d4099ed62238b74a0b74732bc234f1d193e596d9747bf3589f6c613cc0b041d4d92b2b2423775b1c3bbd755dce2054cfa163871d1e24c4f31d1a508baab61443ed97a77562f414c852d70203010001a38193308190300e0603551d0f0101ff0404030205a0301d0603551d250416301406082b0601050507030106082b06010505070302300c0603551d130101ff0402300030190603551d0e041204109f91161f43433e49a6de6db680d79f60301b0603551d230414301280104813494d137e1631bba301d5acab6e7b30190603551d1104123010820e6578616d706c652e676f6c616e67300d06092a864886f70d01010b0500038181009d30cc402b5b50a061cbbae55358e1ed8328a9581aa938a495a1ac315a1a84663d43d32dd90bf297dfd320643892243a00bccf9c7db74020015faad3166109a276fd13c3cce10c5ceeb18782f16c04ed73bbb343778d0c1cf10fa1d8408361c94c722b9daedb4606064df4c1b33ec0d1bd42d4dbfe3d1360845c21d33be9fae7")
++	testRSACertificateIssuer = fromHex("3082021930820182a003020102020900ca5e4e811a965964300d06092a864886f70d01010b0500301f310b3009060355040a1302476f3110300e06035504031307476f20526f6f74301e170d3136303130313030303030305a170d3235303130313030303030305a301f310b3009060355040a1302476f3110300e06035504031307476f20526f6f7430819f300d06092a864886f70d010101050003818d0030818902818100d667b378bb22f34143b6cd2008236abefaf2852adf3ab05e01329e2c14834f5105df3f3073f99dab5442d45ee5f8f57b0111c8cb682fbb719a86944eebfffef3406206d898b8c1b1887797c9c5006547bb8f00e694b7a063f10839f269f2c34fff7a1f4b21fbcd6bfdfb13ac792d1d11f277b5c5b48600992203059f2a8f8cc50203010001a35d305b300e0603551d0f0101ff040403020204301d0603551d250416301406082b0601050507030106082b06010505070302300f0603551d130101ff040530030101ff30190603551d0e041204104813494d137e1631bba301d5acab6e7b300d06092a864886f70d01010b050003818100c1154b4bab5266221f293766ae4138899bd4c5e36b13cee670ceeaa4cbdf4f6679017e2fe649765af545749fe4249418a56bd38a04b81e261f5ce86b8d5c65413156a50d12449554748c59a30c515bc36a59d38bddf51173e899820b282e40aa78c806526fd184fb6b4cf186ec728edffa585440d2b3225325f7ab580e87dd76")
++	testRSAPrivateKey, _ = x509.ParsePKCS1PrivateKey(fromHex("3082025b02010002818100db467d932e12270648bc062821ab7ec4b6a25dfe1e5245887a3647a5080d92425bc281c0be97799840fb4f6d14fd2b138bc2a52e67d8d4099ed62238b74a0b74732bc234f1d193e596d9747bf3589f6c613cc0b041d4d92b2b2423775b1c3bbd755dce2054cfa163871d1e24c4f31d1a508baab61443ed97a77562f414c852d702030100010281800b07fbcf48b50f1388db34b016298b8217f2092a7c9a04f77db6775a3d1279b62ee9951f7e371e9de33f015aea80660760b3951dc589a9f925ed7de13e8f520e1ccbc7498ce78e7fab6d59582c2386cc07ed688212a576ff37833bd5943483b5554d15a0b9b4010ed9bf09f207e7e9805f649240ed6c1256ed75ab7cd56d9671024100fded810da442775f5923debae4ac758390a032a16598d62f059bb2e781a9c2f41bfa015c209f966513fe3bf5a58717cbdb385100de914f88d649b7d15309fa49024100dd10978c623463a1802c52f012cfa72ff5d901f25a2292446552c2568b1840e49a312e127217c2186615aae4fb6602a4f6ebf3f3d160f3b3ad04c592f65ae41f02400c69062ca781841a09de41ed7a6d9f54adc5d693a2c6847949d9e1358555c9ac6a8d9e71653ac77beb2d3abaf7bb1183aa14278956575dbebf525d0482fd72d90240560fe1900ba36dae3022115fd952f2399fb28e2975a1c3e3d0b679660bdcb356cc189d611cfdd6d87cd5aea45aa30a2082e8b51e94c2f3dd5d5c6036a8a615ed0240143993d80ece56f877cb80048335701eb0e608cc0c1ca8c2227b52edf8f1ac99c562f2541b5ce81f0515af1c5b4770dba53383964b4b725ff46fdec3d08907df"))
++	testRSA1024Certificate = fromHex("3082024b308201b4a003020102020900e8f09d3fe25beaa6300d06092a864886f70d01010b0500301f310b3009060355040a1302476f3110300e06035504031307476f20526f6f74301e170d3136303130313030303030305a170d3235303130313030303030305a301a310b3009060355040a1302476f310b300906035504031302476f30819f300d06092a864886f70d010101050003818d0030818902818100db467d932e12270648bc062821ab7ec4b6a25dfe1e5245887a3647a5080d92425bc281c0be97799840fb4f6d14fd2b138bc2a52e67d8d4099ed62238b74a0b74732bc234f1d193e596d9747bf3589f6c613cc0b041d4d92b2b2423775b1c3bbd755dce2054cfa163871d1e24c4f31d1a508baab61443ed97a77562f414c852d70203010001a38193308190300e0603551d0f0101ff0404030205a0301d0603551d250416301406082b0601050507030106082b06010505070302300c0603551d130101ff0402300030190603551d0e041204109f91161f43433e49a6de6db680d79f60301b0603551d230414301280104813494d137e1631bba301d5acab6e7b30190603551d1104123010820e6578616d706c652e676f6c616e67300d06092a864886f70d01010b0500038181009d30cc402b5b50a061cbbae55358e1ed8328a9581aa938a495a1ac315a1a84663d43d32dd90bf297dfd320643892243a00bccf9c7db74020015faad3166109a276fd13c3cce10c5ceeb18782f16c04ed73bbb343778d0c1cf10fa1d8408361c94c722b9daedb4606064df4c1b33ec0d1bd42d4dbfe3d1360845c21d33be9fae7")
++	testRSA1024PrivateKey, _ = x509.ParsePKCS1PrivateKey(fromHex("3082025b02010002818100db467d932e12270648bc062821ab7ec4b6a25dfe1e5245887a3647a5080d92425bc281c0be97799840fb4f6d14fd2b138bc2a52e67d8d4099ed62238b74a0b74732bc234f1d193e596d9747bf3589f6c613cc0b041d4d92b2b2423775b1c3bbd755dce2054cfa163871d1e24c4f31d1a508baab61443ed97a77562f414c852d702030100010281800b07fbcf48b50f1388db34b016298b8217f2092a7c9a04f77db6775a3d1279b62ee9951f7e371e9de33f015aea80660760b3951dc589a9f925ed7de13e8f520e1ccbc7498ce78e7fab6d59582c2386cc07ed688212a576ff37833bd5943483b5554d15a0b9b4010ed9bf09f207e7e9805f649240ed6c1256ed75ab7cd56d9671024100fded810da442775f5923debae4ac758390a032a16598d62f059bb2e781a9c2f41bfa015c209f966513fe3bf5a58717cbdb385100de914f88d649b7d15309fa49024100dd10978c623463a1802c52f012cfa72ff5d901f25a2292446552c2568b1840e49a312e127217c2186615aae4fb6602a4f6ebf3f3d160f3b3ad04c592f65ae41f02400c69062ca781841a09de41ed7a6d9f54adc5d693a2c6847949d9e1358555c9ac6a8d9e71653ac77beb2d3abaf7bb1183aa14278956575dbebf525d0482fd72d90240560fe1900ba36dae3022115fd952f2399fb28e2975a1c3e3d0b679660bdcb356cc189d611cfdd6d87cd5aea45aa30a2082e8b51e94c2f3dd5d5c6036a8a615ed0240143993d80ece56f877cb80048335701eb0e608cc0c1ca8c2227b52edf8f1ac99c562f2541b5ce81f0515af1c5b4770dba53383964b4b725ff46fdec3d08907df"))
++	if boring.Enabled {
++		testRSACertificate = fromHex("30820316308201fea003020102020900e8f09d3fe25beaa6300d06092a864886f70d01010b0500301f310b3009060355040a1302476f3110300e06035504031307476f20526f6f74301e170d3136303130313030303030305a170d3235303130313030303030305a301a310b3009060355040a1302476f310b300906035504031302476f30820122300d06092a864886f70d01010105000382010f003082010a02820101009ff1f93437a89e0815f820e5487ca8adb7890670e40b7a29827ec8eaa87732b0c215184b4548ce84e00cb5e357ffec8a9d5b452d22a35be0f5e144e203ef20f1476f38c4be976c2baffede613f751c7a161cde198b8b255d3246508995ad7d45097ffd6a3ad33ea21360e7d2d15a9e1dfba897d256b524bdc4c0221c92436327d8506c5ecf6f6092f844bd628e792806a9f0a39b969711f0c052377f1baa7c237d07425ef3843a36a6d875312b31055f9300f9f03499ee028a809c0912d62a5f86a0df45f1f0017e867e4fed9e6a5e032ee3bde6b5d1f12ace215061dd714eaff455863b5770d54564a72f0ede9debc57a8c028060a9b99e58fd18fa5de2ffab0203010001a35a3058300e0603551d0f0101ff0404030205a0301d0603551d250416301406082b0601050507030206082b06010505070301300c0603551d130101ff0402300030190603551d1104123010820e6578616d706c652e676f6c616e67300d06092a864886f70d01010b0500038201010078643c0924c04013833c0de7d62f982dec3e688ff8f603ec718194b9731731d33dcdd021bc91232d703151e7fc80be8695a891cc95a858ba3e0fa72ef6fa3bf6b4f19cd028c4632f25e38b896004c2531ef186a801ea40497d65393b6d94da14e2eb292ee1ce87e7f5bf5495c7917906a1298cc3ded2a41e7477f7c0f4c5e7cdf5d05c72294159537e268f4b74380a7ff1d2eae7d6eed5de6596aa94ba78eaba39b13f872363e6459aa0c0fd2929dc12acd9eeab62e2240b8bb7ad534fba28d9763b9d03f8d6a751d1b115d0c634c23452c5b1b2de9c48ffa10d28731464215635b7ff24f688ad15480b17f55d6d4db8f0b488af2e3a7fedf7a27248474091f5")
++		testRSACertificateIssuer = fromHex("308203223082020aa003020102020900ca5e4e811a965964300d06092a864886f70d01010b0500301f310b3009060355040a1302476f3110300e06035504031307476f20526f6f74301e170d3136303130313030303030305a170d3235303130313030303030305a301f310b3009060355040a1302476f3110300e06035504031307476f20526f6f7430820122300d06092a864886f70d01010105000382010f003082010a028201010097187c704d23c78647537639fa72381ec5d68aa33c8b15e0dd640efb3ba9f0c1d7085df4e42a45330203ff6d0369482ecf79f5a5d3025c64c3cb6f1fffd0819ffea74f10d837f8c5085851e5859eed51f171f570f76ffdb54757cd2f56c7d6edac2e5988581b2f181ac3bacc07d9080b58674bf9a6e56a1ee4e6a888fc3c282da5a8e858dd000e2c19f30d7fcb90193467d808435ed3696638dd23640148bb2dfd9c21d73d7ab9e4bad66745bf52c1e37c0e9a5857edbba168e3529e3881d5de6fac51025806f9ce53a48f4e38c6e77a79896b058ec89dc863365f4e09dea6f031a6054a886c5383c397d01bc0753136f5e620e5584e4567d06ef2435a12564d0203010001a361305f300e0603551d0f0101ff040403020204301d0603551d250416301406082b0601050507030206082b06010505070301300f0603551d130101ff040530030101ff301d0603551d0e04160414b9356c49e8b76dfe0781850a248474d8063676af300d06092a864886f70d01010b050003820101001720ec40c4a6d99d65129e160f7976834ba929ce01fc2b0dadadfc32295c9d0a413a1dfc85d5007b05a5feb6f2faa7e3300e03ba433dc934a95d64d937ed24fe6389188a140796b07dd6de0be7be4b63ee5ac13c49937eb18eabc7a2363ce0edc7b3c47ed870218fa8a08e136a4d38de0523266fff75a058b5af6836e9aaad9be931112511d38838151186ee0482e388c898926aa17922b031e68b9703a2337fc2c32af3fafe02ec3937bcb3e26ff2363c1ba18c9e94c7c5e7b096d2c0b0eb6ade426053110b2e441b027c4a42d322144c7fc8feec68f2d955b8fa2374861255bb98e6a8a3630a00ebfd8096110ead849021d0fe16e0263d5126de9f74fadc16")
++		testRSAPrivateKey, _ = x509.ParsePKCS1PrivateKey(fromHex("308204a402010002820101009ff1f93437a89e0815f820e5487ca8adb7890670e40b7a29827ec8eaa87732b0c215184b4548ce84e00cb5e357ffec8a9d5b452d22a35be0f5e144e203ef20f1476f38c4be976c2baffede613f751c7a161cde198b8b255d3246508995ad7d45097ffd6a3ad33ea21360e7d2d15a9e1dfba897d256b524bdc4c0221c92436327d8506c5ecf6f6092f844bd628e792806a9f0a39b969711f0c052377f1baa7c237d07425ef3843a36a6d875312b31055f9300f9f03499ee028a809c0912d62a5f86a0df45f1f0017e867e4fed9e6a5e032ee3bde6b5d1f12ace215061dd714eaff455863b5770d54564a72f0ede9debc57a8c028060a9b99e58fd18fa5de2ffab020301000102820101008da4c6627ddfef838da11dd0af2ee65a612d11ed2ba7165a685c4b25b4674b16c9e9d087e8259fee8054014802087cbc0cba653aa17035cfb52ff7c688615eb50de3eb4c20d50c506c1db3663fc240a3c5ad6eeb046f0779cf2a01ecb606dbe725909925584ef72aa52aae623e5097b249c9761a29fb653c415f3d563c193d570727c2479a5e9800488056db77e110233d8276041306817b3e53e8c7bc775b47b5842feefb0a7bbae8f70f7f1caad15de8ea60a2b52f19217c5ae2c95fa6f0b649667da75ce6ba1b780535bf10935524e4f50110d066c8c149853e0cfeeb92ab862d32baceda08bc43e7cf86e1b37394ac858291069d16e0fe6b9ad542b4415102818100c10d04814bad5dbe1ec1a3d316056ac2a8bff40f7ba1d24d1d4787621938da7ea0ae28b335848c14f855c9c84e6a65ead0b55b2e0672bc63360288159023fb5c752d450b768ad792e1bccabd2d0211bdccdc9f5ac4b23eb4a8bc2d1455bcebf09c7195afa4415c44410a964313e5115b8bf245da20303a2f2b751e9b9ad8bbcf02818100d41973a2ead93efe0712f135d8b69bc919cde8f9920cc1a7f5dd56c6c559195e6c85f62ab147b2b1f34fd3d49370c4d6f64a33aa734edf789d08564a40e009ac354a8844949dc714817072eb05d52240737a507a977cba0e8861d9690cc2ed063fcfff93fa05552d828d39138f88fd3de261ab668254314ed959d1191257696502818100b39790a157eda84fbdfd1692c0e1b937ee14e4cfa28c20406d04a605b4c11742c5e83f24b89cde5483d20b2db505765ac45e72bc9673169e951835d1198edfc05ba209a1685e31be0b12bee8ce7e265313ca0ad53e3733ee8d2ac22530bdd820b6e953ff5a2713d6cb4b360ea0eb71026166b964fa9ce3040ec19dffd445dc31028180291fc2370d780fe9ab2f760b6db8825e2c9dab1570c6fe69759773f2d862dd335cb160b888651175c56a6df5229d53dd2625defca69cdd618279125a15581b2803b12ed8b5441e4c9088600fc7b2ba906a9385b52f5824af1aac763e13165c64c0ccb08e5d84d92e18c90f0f06de95d380e855166c20aceacfe3c5522a273ead02818042617bea8a82613dec243aafd8e70ac305e656d4540ae500fd5b933cff9cf1778addbc9b6385b269a0eaedbcc76b97aba9cbd1f3e01243dc55f054588f144ee3a9e36a8b4176d6f88bc413cc303dd438317a2cbe44c8b891f55e3154c4bc297c6f83baf1b2eab330fb1c56269650be96355061b03dbef76747c525f3cf910929"))
++	}
++}
+\ No newline at end of file
+diff --git a/src/crypto/tls/tls_test.go b/src/crypto/tls/tls_test.go
+index d8a43add17..d52028c0fb 100644
+--- a/src/crypto/tls/tls_test.go
++++ b/src/crypto/tls/tls_test.go
+@@ -24,6 +24,8 @@ import (
+ 	"time"
+ )
+ 
++import boring "crypto/internal/backend"
++
+ var rsaCertPEM = `-----BEGIN CERTIFICATE-----
+ MIIB0zCCAX2gAwIBAgIJAI/M7BYjwB+uMA0GCSqGSIb3DQEBBQUAMEUxCzAJBgNV
+ BAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5ldCBX
+@@ -1071,6 +1073,9 @@ func TestConnectionState(t *testing.T) {
+ 		case VersionTLS12:
+ 			name = "TLSv12"
+ 		case VersionTLS13:
++			if boring.Enabled {
++				t.Skip("boring enabled, TLS 1.3 not supported")
++			}
+ 			name = "TLSv13"
+ 		}
+ 		t.Run(name, func(t *testing.T) {

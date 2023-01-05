@@ -1,0 +1,22 @@
+diff --git a/src/go.mod b/src/go.mod
+index d4946ed874..51bcb20cb5 100644
+--- a/src/go.mod
++++ b/src/go.mod
+@@ -13,3 +13,5 @@ require (
+ 	golang.org/x/sys v0.0.0-20220614162138-6c1b26c55098 // indirect
+ 	golang.org/x/text v0.3.8-0.20220509174342-b4bca84b0361 // indirect
+ )
++
++replace github.com/microsoft/go-crypto-openssl v0.2.1 => github.com/bosdhill/go-crypto-openssl v0.2.3-arastra
+diff --git a/src/go.sum b/src/go.sum
+index a21400d999..603d784a78 100644
+--- a/src/go.sum
++++ b/src/go.sum
+@@ -1,5 +1,5 @@
+-github.com/microsoft/go-crypto-openssl v0.2.1 h1:YFcvMkJeBXucC5wkNne/BbB7V02z1TjRxXbvGmEaFd4=
+-github.com/microsoft/go-crypto-openssl v0.2.1/go.mod h1:rC+rtBU3m60UCQifBmpWII0VETfu78w6YGZQvVc0rd4=
++github.com/bosdhill/go-crypto-openssl v0.2.3-arastra h1:CBToQoDXAnpeTN86EVk2yTcFnHZgbsan22EPOFyESEU=
++github.com/bosdhill/go-crypto-openssl v0.2.3-arastra/go.mod h1:rC+rtBU3m60UCQifBmpWII0VETfu78w6YGZQvVc0rd4=
+ github.com/microsoft/go-crypto-winnative v0.0.0-20221003180653-84bf0c539a8e h1:9iYvunmn8z1LIbUG7qtD3O3cuPlbjWY90Vn6ox/divM=
+ github.com/microsoft/go-crypto-winnative v0.0.0-20221003180653-84bf0c539a8e/go.mod h1:fveERXKbeK+XLmOyU24caKnIT/S5nniAX9XCRHfnrM4=
+ golang.org/x/crypto v0.0.0-20220516162934-403b01795ae8 h1:y+mHpWoQJNAHt26Nhh6JP7hvM71IRZureyvZhoVALIs=

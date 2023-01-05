@@ -1,0 +1,14 @@
+diff --git a/src/go/build/deps_test.go b/src/go/build/deps_test.go
+index 4d7bc0d853..48838c1e2b 100644
+--- a/src/go/build/deps_test.go
++++ b/src/go/build/deps_test.go
+@@ -415,7 +415,8 @@ var depsRules = `
+ 	< crypto/cipher;
+ 
+ 	crypto/cipher,
+-	crypto/internal/boring/bcache
++	crypto/internal/boring/bcache,
++	crypto/internal/boring/fipstls
+ 	< github.com/microsoft/go-crypto-winnative/internal/subtle
+ 	< github.com/microsoft/go-crypto-winnative/internal/sysdll
+ 	< github.com/microsoft/go-crypto-winnative/internal/bcrypt
